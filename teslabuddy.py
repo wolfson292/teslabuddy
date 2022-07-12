@@ -468,6 +468,22 @@ class TeslaBuddy:
         STANDARD_TOPICS = [
             # [topic, hass type, description, unit of measurement, class, icon]
             [
+                "locked",
+                "binary_sensor",
+                "Locked",
+                None,
+                None,
+                "mdi:lock",
+            ],
+            [
+                "version",
+                "sensor",
+                "Version",
+                None,
+                None,
+                None,
+            ],
+            [
                 "state",
                 "sensor",
                 "State",
