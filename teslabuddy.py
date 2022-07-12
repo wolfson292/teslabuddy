@@ -579,6 +579,46 @@ class TeslaBuddy:
                 None,
                 None,
             ],
+            [
+                "is_user_present",
+                "binary_sensor",
+                "User Present",
+                None,
+                None,
+                None,
+            ],
+            [
+                "update_available",
+                "binary_sensor",
+                "Update Available",
+                None,
+                None,
+                None,
+            ],
+            [
+                "exterior_color",
+                "sensor",
+                "Exterior Color",
+                None,
+                None,
+                None,
+            ],
+            [
+                "wheel_type",
+                "sensor",
+                "Wheel Type",
+                None,
+                None,
+                None,
+            ],
+            [
+                "sentry_mode",
+                "sensor",
+                "Sntry Mode",
+                None,
+                None,
+                None,
+            ],
         ]
 
         # Special case to handle the device element
