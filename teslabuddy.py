@@ -53,6 +53,13 @@ MAP_THROUGH_TOPICS = {
     "outside_temp",
     "state",
     "time_to_full_charge",
+    "locked",
+    "version",
+    "exterior_color",
+    "wheel_type",
+    "sentry_mode",
+    "is_user_present",
+    "update_available"
 }
 
 
