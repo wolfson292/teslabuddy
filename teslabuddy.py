@@ -131,6 +131,10 @@ class TeslaBuddy:
         self.client = paho.mqtt.client.Client()
         self.client.on_connect = self.onmqttconnect
         self.client.on_message = self.onmqttmessage
+
+        if self.config.mqtt_username is not None:
+            self.client.username_pw_set(self.config.mqtt_username, self.config.mqtt_password)
+
         self.client.connect(self.config.mqtt_host)
         self.client.loop_start()
 
