@@ -315,6 +315,17 @@ class TeslaBuddy:
             help="MQTT broker host name",
             required=True,
         )
+
+        parser.add_argument(
+            "--mqtt-username",
+            help="MQTT broker username",
+        )
+
+        parser.add_argument(
+            "--mqtt-password",
+            help="MQTT broker password",
+        )
+        
         parser.add_argument(
             "--mqtt-port",
             help="MQTT broker port",
