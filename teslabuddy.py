@@ -482,7 +482,7 @@ class TeslaBuddy:
         An item is only published if it has changed from when previously published.
         """
         if self._pubstate.get(item) != value:
-            self.client.publish(f"{self.basetopic}/{item}", value)
+            self.client.publish(f"{self.basetopic}/{item}", value, retain = True)
             self._pubstate[item] = value
 
     def homeassistantsetup(self):
