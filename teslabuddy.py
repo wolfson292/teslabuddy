@@ -20,7 +20,6 @@ import argparse
 import queue
 import time
 import json
-import math
 import logging
 import threading
 import postgres
@@ -36,6 +35,9 @@ COMMAND_RETRY_DELAY = 10
 # Number of seconds to cache the token from the TeslaMate DB
 TOKEN_CACHE_TIME = 30
 
+# Pub cache time in seconds
+PUBLISH_CACHE_TIME = 3600
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s: %(levelname)s:%(name)s: %(message)s"
 )
@@ -48,9 +50,12 @@ MAP_THROUGH_TOPICS = {
     "charger_actual_current",
     "charger_power",
     "charger_voltage",
+    "est_battery_range_km",
+    "ideal_battery_range_km",
     "inside_temp",
     "odometer",
     "outside_temp",
+    "rated_battery_range_km",
     "state",
     "time_to_full_charge",
     "locked",
@@ -73,6 +78,7 @@ class TeslaBuddy:
         # other rather than an internal queue where all updates would eventually hit
         # the Tesla API, potentially resulting in ratelimits getting hit sooner.
         self._pubstate = {}
+        self._pubcacheexpiry = time.time() + PUBLISH_CACHE_TIME
 
         self._tokencache = {}
 
@@ -82,6 +88,11 @@ class TeslaBuddy:
         self.carmodeltxt: str | None = None
         self.error_sleep_time = COMMAND_RETRY_DELAY
         self.teslamatesettings = None
+
+        if self.config.wake_topics:
+            self.wake_topics = set(self.config.wake_topics.split())
+        else:
+            self.wake_topics = set()
 
         self.basetopic = ""
 
@@ -112,6 +123,8 @@ class TeslaBuddy:
         self.vin = cardata[1]
         self.eid = cardata[2]
         self.carname = cardata[3]
+        if self.carname is None:
+            raise ValueError("Car name is not set in TeslaMate!")
         self.carmodeltxt = f"Model {cardata[5]} {cardata[4]}"
 
         self.teslamatesettings = self.getdbconn().one("SELECT * FROM settings LIMIT 1;")
@@ -138,7 +151,7 @@ class TeslaBuddy:
         self.client.connect(self.config.mqtt_host)
         self.client.loop_start()
 
-        # Thread to moanage bundling GPS information into a single message
+        # Thread to manage bundling GPS information into a single message
         threading.Thread(target=self.gpsbundlethread, daemon=True).start()
         # Thread to manage waking TeslaMate when incoming commands happen
         threading.Thread(target=self.waketeslamatethread, daemon=True).start()
@@ -158,6 +171,8 @@ class TeslaBuddy:
     def onmqttconnect(self, client, userdata, flags, rc):
         self.client.subscribe(f"{self.basetopic}/+/set")
         self.client.subscribe(f"teslamate/cars/{self.tmid}/+")
+        for topic in self.wake_topics:
+            self.client.subscribe(topic)
 
     def onmqttmessage(self, client, userdata, msg):
         payload = msg.payload.decode()
@@ -165,11 +180,17 @@ class TeslaBuddy:
         parts = topic.split("/")
 
         log.debug("Incomming MQTT Message: %s : %s", topic, payload)
-        if topic.startswith("teslamate/cars/"):
+        if topic in self.wake_topics:
+            self.waketeslamate()
+        elif topic.startswith("teslamate/cars/"):
             self.teslamatemsg(parts[3], payload)
         elif topic.startswith(self.basetopic):
             if parts[-1] == "set":
                 self.teslapiq.put((parts[-2], payload))
+
+    def mqtt_publish(self, topic, payload, retain=False):
+        log.debug("Publishing MQTT Message: %s : %s", topic, payload)
+        self.client.publish(topic, payload, retain=retain)
 
     def teslamatemsg(self, topic, value):
         "Process as message from TeslaMate"
@@ -352,6 +373,14 @@ class TeslaBuddy:
         )
 
         parser.add_argument(
+            "--wake-topics",
+            help="a space separated list of MQTT topics to subscribe to and use to "
+            "wake up TeslaMate. If any of the topics are called with any value, "
+            "the TeslaMate API will be called to cancel sleep. "
+            "Used for example when the garage door is opened",
+        )
+
+        parser.add_argument(
             "--debug",
             help='if set to "true", will include debug level logging',
         )
@@ -480,9 +509,16 @@ class TeslaBuddy:
         """Publish to MQTT item (self.basetopic will be applied), with value.
 
         An item is only published if it has changed from when previously published.
+
+        Cache is cleared about every hour.
         """
+        if time.time() > self._pubcacheexpiry:
+            log.debug("Clearing publish cache")
+            self._pubstate.clear()
+            self._pubcacheexpiry = time.time() + PUBLISH_CACHE_TIME
+
         if self._pubstate.get(item) != value:
-            self.client.publish(f"{self.basetopic}/{item}", value, retain = True)
+            self.mqtt_publish(f"{self.basetopic}/{item}", value)
             self._pubstate[item] = value
 
     def homeassistantsetup(self):
@@ -644,7 +680,7 @@ class TeslaBuddy:
         ]
 
         # Special case to handle the device element
-        self.client.publish(
+        self.mqtt_publish(
             f"homeassistant/sensor/{self.vin}/battery/config",
             json.dumps(
                 {
@@ -678,14 +714,14 @@ class TeslaBuddy:
             if icon:
                 data["icon"] = icon
 
-            self.client.publish(
+            self.mqtt_publish(
                 f"homeassistant/{hasstype}/{self.vin}/{topic}/config",
                 json.dumps(data),
                 retain=True,
             )
 
         # Charge limit, including setting
-        self.client.publish(
+        self.mqtt_publish(
             f"homeassistant/number/{self.vin}/charge_limit_soc/config",
             json.dumps(
                 {
@@ -703,7 +739,7 @@ class TeslaBuddy:
         )
 
         # Charging action, including setting/turning on/off
-        self.client.publish(
+        self.mqtt_publish(
             f"homeassistant/switch/{self.vin}/charging/config",
             json.dumps(
                 {
@@ -718,7 +754,7 @@ class TeslaBuddy:
             retain=True,
         )
 
-        self.client.publish(
+        self.mqtt_publish(
             f"homeassistant/device_tracker/{self.vin}/gps/config",
             json.dumps(
                 {
